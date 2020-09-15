@@ -1,3 +1,16 @@
+//ドラッグ&ドロップ
+interface Draggable {
+    dragStartHandler(event: DragEvent): void;
+    dragEndHandler(event: DragEvent): void;
+}
+
+interface DragTarget {
+    dragOverHandler(event:DragEvent): void;//その場所が有効なドロップ対象であるかどうかを判断
+    dropHandler(event: DragEvent): void;//実際にドロップが起きた時に呼ばれるイベントハンドラー
+    dragLeaveHandler(event: DragEvent): void;//表示に関し便利なハンドラー。ドラッグが起きる時に背景色変えたり、途中でやめた時に表示元に戻したり。
+}
+
+
 // 型定義
 enum ProjectStatus {
     Active, Finished
@@ -55,6 +68,18 @@ class ProjectState extends State<Project> {
             ProjectStatus.Active
         );
         this.projects.push(newProject);
+        this.updateListeners();
+    }
+
+    moveProject(projectId: string, newStatus: ProjectStatus) {
+        const project = this.projects.find(prj => prj.id === projectId);
+        if (project && project.status !== newStatus) {
+            project.status = newStatus;
+            this.updateListeners();
+        }
+    }
+
+    private updateListeners() {
         for (const listenerFn of this.listeners) {
             listenerFn(this.projects.slice());
         }
@@ -75,10 +100,10 @@ interface Validatable {
 
 function validate(validatableInput: Validatable) {
     let isValid = true;
-    if(validatableInput.required) {
+    if (validatableInput.required) {
         isValid = isValid && validatableInput.value.toString().trim().length !== 0;
     }
-    if(validatableInput.minLength !=null && typeof validatableInput.value === "string"){
+    if (validatableInput.minLength !=null && typeof validatableInput.value === "string"){
         isValid = isValid && validatableInput.value.length >= validatableInput.minLength;
     }
     if(validatableInput.maxLength !=null && typeof validatableInput.value === "string"){
@@ -140,7 +165,7 @@ abstract class Component<T extends HTMLElement, U extends HTMLElement> {
 }
 
 // リストに追加するアイテムを作成するclass
-class ProjectItem extends Component<HTMLUListElement,HTMLLIElement>{
+class ProjectItem extends Component<HTMLUListElement,HTMLLIElement> implements Draggable{
     private project: Project;
 
     get manday(){
@@ -158,9 +183,21 @@ class ProjectItem extends Component<HTMLUListElement,HTMLLIElement>{
         this.configure();
         this.renderContent();
     }
-    configure(){
 
+    @autobind
+    dragStartHandler(event: DragEvent){
+        event.dataTransfer!.setData('text/plain', this.project.id);
+        event.dataTransfer!.effectAllowed = 'move';
     }
+    dragEndHandler(_: DragEvent){
+        console.log('end');
+    }
+
+    configure(){
+        this.element.addEventListener('dragstart', this.dragStartHandler);
+        this.element.addEventListener('dragend', this.dragEndHandler);
+    }
+
     renderContent(){
         this.element.querySelector('h2')!.textContent = this.project.title;
         this.element.querySelector('h3')!.textContent = this.manday//getterはプロパティのように呼び出せる
@@ -170,7 +207,7 @@ class ProjectItem extends Component<HTMLUListElement,HTMLLIElement>{
 
 
 //一覧表示させるためのclass
-class ProjectList extends Component<HTMLTemplateElement,HTMLElement >{
+class ProjectList extends Component<HTMLTemplateElement,HTMLElement > implements DragTarget{
     assignedProjects: Project[]; 
 
     constructor(private type: 'active' | 'finished' ) {
@@ -181,7 +218,35 @@ class ProjectList extends Component<HTMLTemplateElement,HTMLElement >{
         this.renderContent();
     }
 
+    @autobind
+    dragOverHandler(event: DragEvent) {
+        if(event.dataTransfer && event.dataTransfer.types[0] === 'text/plain'){//ここでは写真とかのドラッグは非許可
+            event.preventDefault();//dropを許可（jsデフォルトではドロップは許可されていない）
+            const listEl = this.element.querySelector('ul')!;
+            listEl.classList.add('droppable');
+        }
+    }
+
+    @autobind
+    dropHandler(event: DragEvent) {
+        const prjId = event.dataTransfer!.getData('text/plain');
+        projectState.moveProject(
+            prjId,
+            this.type === 'active' ? ProjectStatus.Active : ProjectStatus.Finished,
+        );
+    }
+
+    @autobind
+    dragLeaveHandler(_: DragEvent) {
+        const listEl = this.element.querySelector('ul')!;
+        listEl.classList.remove('droppable');
+    }
+
     configure() {
+        this.element.addEventListener('dragover', this.dragOverHandler);
+        this.element.addEventListener('drop', this.dropHandler);
+        this.element.addEventListener('dragleave', this.dragLeaveHandler);
+
         projectState.addListener((projects: Project[])=>{
             // 実行中・完了のフィルタリング実装
             const relevantProjects = projects.filter(prj => {
